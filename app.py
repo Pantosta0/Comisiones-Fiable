@@ -153,6 +153,67 @@ def calculate_commissions_by_product(df):
     return commissions_by_product
 
 
+def calculate_units_by_product(df):
+    """
+    Calculate total units sold by product
+    """
+    if 'producto' not in df.columns or 'Cantidad' not in df.columns:
+        return None
+    
+    # Group by product and sum quantities
+    units_by_product = df.groupby('producto')['Cantidad'].sum().reset_index()
+    units_by_product.columns = ['Producto', 'Unidades Vendidas']
+    
+    # Sort by units sold descending
+    units_by_product = units_by_product.sort_values('Unidades Vendidas', ascending=False)
+    
+    return units_by_product
+
+
+def calculate_sales_boss_commission(df):
+    """
+    Calculate commission for sales boss (Jefe de Ventas)
+    - Ludy Salcedo
+    - Based on "Utilitarios" product sales (case-insensitive)
+    - Goal: 260 sales = 100% achievement = 0.10% commission rate
+    - Commission rate scales with achievement percentage
+    """
+    if 'producto' not in df.columns:
+        return None
+    
+    # Filter for Utilitarios products (case-insensitive)
+    utilitarios_df = df[df['producto'].str.upper().fillna('') == 'UTILITARIOS'].copy()
+    
+    if len(utilitarios_df) == 0:
+        return None
+    
+    # Calculate metrics
+    total_sales_count = len(utilitarios_df)
+    total_sales_value = utilitarios_df['TotalFac'].sum()
+    goal = 260
+    
+    # Calculate achievement percentage
+    achievement_percentage = (total_sales_count / goal) * 100
+    
+    # Calculate commission rate (0.10% at 100% achievement, scales proportionally)
+    base_rate = 0.10  # 0.10% at 100% achievement
+    commission_rate = base_rate * (achievement_percentage / 100)
+    
+    # Calculate commission amount
+    commission_amount = total_sales_value * (commission_rate / 100)
+    
+    return {
+        'nombre': 'Ludy Salcedo',
+        'producto': 'Utilitarios',
+        'ventas_count': total_sales_count,
+        'ventas_value': total_sales_value,
+        'meta': goal,
+        'porcentaje_logro': achievement_percentage,
+        'tasa_comision': commission_rate,
+        'comision': commission_amount
+    }
+
+
 # File upload
 uploaded_file = st.file_uploader(
     "Subir archivo Excel (.xlsx)",
@@ -238,10 +299,22 @@ if uploaded_file is not None:
             with st.spinner("Calculando comisiones..."):
                 commission_summary = calculate_commissions(df_processed)
                 commissions_by_product = calculate_commissions_by_product(df_processed)
+                sales_boss_commission = calculate_sales_boss_commission(df_processed)
+                units_by_product = calculate_units_by_product(df_processed)
             
             # Display results
             st.markdown("---")
             st.header("📊 Resumen de Comisiones por Vendedor")
+            
+            # Units sold by product statistic
+            if units_by_product is not None:
+                st.subheader("📦 Unidades Vendidas por Producto")
+                st.dataframe(
+                    units_by_product,
+                    use_container_width=True,
+                    hide_index=True
+                )
+                st.markdown("---")
             
             # Summary metrics
             col1, col2, col3, col4 = st.columns(4)
@@ -270,6 +343,52 @@ if uploaded_file is not None:
                 hide_index=True
             )
             
+            # Sales Boss Commission Section
+            if sales_boss_commission:
+                st.markdown("---")
+                st.header("👔 Comisión de Jefe de Ventas")
+                
+                boss_info = sales_boss_commission
+                
+                # Display metrics
+                col1, col2, col3, col4, col5 = st.columns(5)
+                with col1:
+                    st.metric("Jefe de Ventas", boss_info['nombre'])
+                with col2:
+                    st.metric("Producto", boss_info['producto'])
+                with col3:
+                    st.metric("Ventas Realizadas", f"{boss_info['ventas_count']}")
+                with col4:
+                    st.metric("Meta", f"{boss_info['meta']}")
+                with col5:
+                    st.metric("% Logro", f"{boss_info['porcentaje_logro']:.2f}%")
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Total Ventas Utilitarios", f"${boss_info['ventas_value']:,.2f}")
+                with col2:
+                    st.metric("Tasa de Comisión", f"{boss_info['tasa_comision']:.3f}%")
+                with col3:
+                    st.metric("Comisión Total", f"${boss_info['comision']:,.2f}")
+                
+                # Display detailed table
+                boss_df = pd.DataFrame([{
+                    'Jefe de Ventas': boss_info['nombre'],
+                    'Producto': boss_info['producto'],
+                    'Ventas Realizadas': boss_info['ventas_count'],
+                    'Meta': boss_info['meta'],
+                    '% Logro': f"{boss_info['porcentaje_logro']:.2f}%",
+                    'Total Ventas': f"${boss_info['ventas_value']:,.2f}",
+                    'Tasa Comisión': f"{boss_info['tasa_comision']:.3f}%",
+                    'Comisión': f"${boss_info['comision']:,.2f}"
+                }])
+                
+                st.dataframe(
+                    boss_df,
+                    use_container_width=True,
+                    hide_index=True
+                )
+            
             # Download button
             st.markdown("---")
             st.subheader("💾 Exportar Resultados")
@@ -296,6 +415,25 @@ if uploaded_file is not None:
                     download_df['tasa_comision'] = download_df['tasa_comision'].apply(lambda x: f"{x}%")
                     download_df.columns = ['Vendedor', 'Total Ventas', 'N° Facturas', 'Clientes Únicos', 'Tasa Comisión', 'Comisión']
                     download_df.to_excel(writer, sheet_name='Comisiones', index=False)
+                
+                # Sales Boss Commission Sheet
+                if sales_boss_commission:
+                    boss_info = sales_boss_commission
+                    boss_download = pd.DataFrame([{
+                        'Jefe de Ventas': boss_info['nombre'],
+                        'Producto': boss_info['producto'],
+                        'Ventas Realizadas': boss_info['ventas_count'],
+                        'Meta': boss_info['meta'],
+                        '% Logro': f"{boss_info['porcentaje_logro']:.2f}%",
+                        'Total Ventas': boss_info['ventas_value'],
+                        'Tasa Comisión': f"{boss_info['tasa_comision']:.3f}%",
+                        'Comisión': boss_info['comision']
+                    }])
+                    boss_download.to_excel(writer, sheet_name='Comision Jefe Ventas', index=False)
+                
+                # Units sold by product
+                if units_by_product is not None:
+                    units_by_product.to_excel(writer, sheet_name='Unidades por Producto', index=False)
                 
                 # Processed data
                 df_processed.to_excel(writer, sheet_name='Datos Procesados', index=False)
